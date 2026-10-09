@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Real-Time side-by-side animated simulator comparing Go-Back-N and Selective Repeat sliding-window protocols. Computer Networks – Module 3, Data Link Layer." />
+  <title>CN Arena — Go-Back-N vs. Selective Repeat</title>
+
+  <!-- Design System & Styles -->
+  <link rel="stylesheet" href="styles.css" />
+
+  <!--
+    Script load order matters:
+      1. engine.js   — shared helpers, EventBus, SimClock, SimConfig
+      2. gbn.js      — Go-Back-N protocol (uses Engine)
+      3. sr.js       — Selective Repeat protocol (uses Engine)
+      4. main.js     — wiring + DOMContentLoaded init
+  -->
+</head>
+<body>
+
+<div class="page-wrapper">
+
+  <!-- =====================================================
+       HEADER
+       ===================================================== -->
+  <header class="site-header" role="banner">
+    <div class="header-left">
+      <h1 class="site-title">Go-Back-N vs. Selective Repeat Arena</h1>
+      <p class="site-subtitle">Real-time side-by-side sliding-window protocol visualiser</p>
+    </div>
+    <div class="module-badge" aria-label="Course module">
+      Module 3 &mdash; Data Link Layer
+    </div>
+  </header>
+
+  <!-- =====================================================
+       LEGEND BAR
+       ===================================================== -->
+  <div class="legend-bar" role="complementary" aria-label="Color legend">
+    <span class="legend-title">Legend</span>
+    <div class="legend-items">
+      <div class="legend-item">
+        <div class="legend-dot ld-data"></div>
+        <span>Data packet</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot ld-ack"></div>
+        <span>ACK</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot ld-dropped"></div>
+        <span>Dropped / Lost</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot ld-timeout"></div>
+        <span>Timeout / Retransmit</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot ld-buffered"></div>
+        <span>Buffered (SR)</span>
+      </div>
+    </div>
+    <div class="legend-hint" role="note">
+      Click any packet in flight to drop it
+    </div>
+  </div>
+
+  <!-- =====================================================
+       MAIN CONTENT — TWO ARENA CARDS
+       ===================================================== -->
+  <main class="main-content" role="main">
+
+    <!-- ─────────────────────────────────────────────────
+         ARENA 1: GO-BACK-N
+         ───────────────────────────────────────────────── -->
+    <section class="arena-card arena-gbn" id="arena-gbn"
+             aria-label="Go-Back-N protocol arena">
+
+      <!-- Arena header -->
+      <div class="arena-header">
+        <div class="arena-title-group">
+          <div class="arena-protocol-tag" aria-hidden="true">Go-Back-N</div>
+          <h2 class="arena-title">Go-Back-N (GBN)</h2>
+          <p class="arena-rule">
+            Cumulative ACKs &mdash; receiver discards out-of-order packets &mdash;
+            sender retransmits the <em>entire window</em> on timeout.
+          </p>
+        </div>
+        <!-- Per-arena stats -->
+        <div class="arena-stats" role="region" aria-label="GBN statistics">
+          <div class="stat-chip">
+            <span class="stat-label">Sent</span>
+            <span class="stat-value stat-sent" aria-live="polite">0</span>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">Retrans.</span>
+            <span class="stat-value stat-retransmissions" aria-live="polite">0</span>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">ACKs</span>
+            <span class="stat-value stat-acks" aria-live="polite">0</span>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">Timeouts</span>
+            <span class="stat-value stat-timeouts" aria-live="polite">0</span>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">Efficiency</span>
+            <span class="stat-value stat-efficiency" aria-live="polite">–</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arena body: Sender | Channel | Receiver -->
+      <div class="arena-body">
+
+        <!-- Sender box -->
+        <div class="endpoint-box sender-box" role="region" aria-label="GBN Sender">
+          <div class="endpoint-label">Sender</div>
+          <div class="window-label">Sender Window</div>
+          <div class="sender-window" aria-label="Sliding window cells"></div>
+        </div>
+
+        <!-- Channel (flight path) -->
+        <div class="channel-wrapper">
+          <div class="channel-labels">
+            <span>← Sender</span>
+            <span>Receiver →</span>
+          </div>
+          <div class="channel" id="channel-gbn" aria-label="Packet channel">
+            <div class="channel-edge left"  aria-hidden="true"></div>
+            <div class="channel-edge right" aria-hidden="true"></div>
+            <div class="channel-lane-label data-lane" aria-hidden="true">Data →</div>
+            <div class="channel-lane-label ack-lane"  aria-hidden="true">← ACK</div>
+          </div>
+        </div>
+
+        <!-- Receiver box -->
+        <div class="endpoint-box receiver-box" role="region" aria-label="GBN Receiver">
+          <div class="endpoint-label">Receiver</div>
+          <div class="receiver-info">
+            <div class="expected-seq-display">
+              <span>Expecting seq</span>
+              <span class="expected-seq-value" aria-live="polite">0</span>
+            </div>
+            <div class="delivered-label">Delivered</div>
+            <div class="delivered-strip" aria-label="Delivered packets"></div>
+          </div>
+        </div>
+
+      </div><!-- /arena-body -->
+
+      <!-- Log -->
+      <div class="arena-footer">
+        <div class="log-title">Event Log</div>
+        <div class="arena-log" role="log" aria-label="GBN event log" aria-live="polite"></div>
+      </div>
+
+      <!-- Done overlay (hidden until simulation finishes) -->
+      <div class="done-overlay hidden" aria-hidden="true">
+        <div class="done-message">
+          <div class="done-icon">✅</div>
+          <div class="done-title">Transfer Complete</div>
+          <div class="done-subtitle">All packets delivered successfully</div>
+        </div>
+      </div>
+
+    </section><!-- /arena-gbn -->
+
+
+    <!-- ─────────────────────────────────────────────────
+         ARENA 2: SELECTIVE REPEAT
+         ───────────────────────────────────────────────── -->
+    <section class="arena-card arena-sr" id="arena-sr"
+             aria-label="Selective Repeat protocol arena">
+
+      <!-- Arena header -->
+      <div class="arena-header">
+        <div class="arena-title-group">
+          <div class="arena-protocol-tag" aria-hidden="true">Selective Repeat</div>
+          <h2 class="arena-title">Selective Repeat (SR)</h2>
+          <p class="arena-rule">
+            Individual ACKs &mdash; receiver <em>buffers</em> out-of-order packets &mdash;
+            sender retransmits <em>only the lost packet</em> on timeout.
+          </p>
+        </div>
+        <!-- Per-arena stats -->
+        <div class="arena-stats" role="region" aria-label="SR statistics">
+          <div class="stat-chip">
+            <span class="stat-label">Sent</span>
+            <span class="stat-value stat-sent" aria-live="polite">0</span>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">Retrans.</span>
+            <span class="stat-value stat-retransmissions" aria-live="polite">0</span>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">ACKs</span>
+            <span class="stat-value stat-acks" aria-live="polite">0</span>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">Timeouts</span>
+            <span class="stat-value stat-timeouts" aria-live="polite">0</span>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">Efficiency</span>
+            <span class="stat-value stat-efficiency" aria-live="polite">–</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arena body: Sender | Channel | Receiver -->
+      <div class="arena-body">
+
+        <!-- Sender box -->
+        <div class="endpoint-box sender-box" role="region" aria-label="SR Sender">
+          <div class="endpoint-label">Sender</div>
+          <div class="window-label">Sender Window</div>
+          <div class="sender-window" aria-label="Sliding window cells"></div>
+        </div>
+
+        <!-- Channel -->
+        <div class="channel-wrapper">
+          <div class="channel-labels">
+            <span>← Sender</span>
+            <span>Receiver →</span>
+          </div>
+          <div class="channel" id="channel-sr" aria-label="Packet channel">
+            <div class="channel-edge left"  aria-hidden="true"></div>
+            <div class="channel-edge right" aria-hidden="true"></div>
+            <div class="channel-lane-label data-lane" aria-hidden="true">Data →</div>
+            <div class="channel-lane-label ack-lane"  aria-hidden="true">← ACK</div>
+          </div>
+        </div>
+
+        <!-- Receiver box: SR has buffer array instead of just expected-seq -->
+        <div class="endpoint-box receiver-box" role="region" aria-label="SR Receiver">
+          <div class="endpoint-label">Receiver</div>
+          <div class="receiver-info">
+            <div class="buffer-label">Receive Buffer</div>
+            <div class="buffer-array" aria-label="Receive buffer slots"></div>
+            <div class="delivered-label">Delivered</div>
+            <div class="delivered-strip" aria-label="Delivered packets"></div>
+          </div>
+        </div>
+
+      </div><!-- /arena-body -->
+
+      <!-- Log -->
+      <div class="arena-footer">
+        <div class="log-title">Event Log</div>
+        <div class="arena-log" role="log" aria-label="SR event log" aria-live="polite"></div>
+      </div>
+
+      <!-- Done overlay -->
+      <div class="done-overlay hidden" aria-hidden="true">
+        <div class="done-message">
+          <div class="done-icon">✅</div>
+          <div class="done-title">Transfer Complete</div>
+          <div class="done-subtitle">All packets delivered successfully</div>
+        </div>
+      </div>
+
+    </section><!-- /arena-sr -->
+
+  </main><!-- /main-content -->
+
+</div><!-- /page-wrapper -->
+
+<!-- =====================================================
+     GLOBAL CONTROLS BAR (sticky bottom)
+     ===================================================== -->
+<nav class="controls-bar" role="navigation" aria-label="Simulation controls">
+
+  <!-- Play / Pause -->
+  <button id="btn-play" class="btn btn-play" aria-label="Play simulation">
+    ▶ Play
+  </button>
+
+  <!-- Reset -->
+  <button id="btn-reset" class="btn btn-reset" aria-label="Reset simulation">
+    ↺ Reset
+  </button>
+
+  <div class="ctrl-sep" aria-hidden="true"></div>
+
+  <!-- Window Size -->
+  <div class="ctrl-group">
+    <label class="ctrl-label" for="slider-window">Window&nbsp;W</label>
+    <input
+      type="range"
+      id="slider-window"
+      min="1" max="7" step="1" value="4"
+      aria-label="Window size"
+    />
+    <span class="ctrl-value" id="val-window">4</span>
+  </div>
+
+  <div class="ctrl-sep" aria-hidden="true"></div>
+
+  <!-- Speed -->
+  <div class="ctrl-group">
+    <label class="ctrl-label" for="slider-speed">Speed</label>
+    <input
+      type="range"
+      id="slider-speed"
+      min="0.5" max="2.0" step="0.25" value="1.0"
+      aria-label="Simulation speed"
+    />
+    <span class="ctrl-value" id="val-speed">1.0x</span>
+  </div>
+
+  <div class="ctrl-sep" aria-hidden="true"></div>
+
+  <!-- Timeout -->
+  <div class="ctrl-group">
+    <label class="ctrl-label" for="slider-timeout">Timeout</label>
+    <input
+      type="range"
+      id="slider-timeout"
+      min="1.0" max="6.0" step="0.5" value="3.0"
+      aria-label="Timeout duration in simulation seconds"
+    />
+    <span class="ctrl-value" id="val-timeout">3.0s</span>
+  </div>
+
+  <div class="ctrl-sep" aria-hidden="true"></div>
+
+  <!-- Total Packets -->
+  <div class="ctrl-group">
+    <label class="ctrl-label" for="slider-total">Packets</label>
+    <input
+      type="range"
+      id="slider-total"
+      min="4" max="20" step="1" value="12"
+      aria-label="Total packets to send"
+    />
+    <span class="ctrl-value" id="val-total">12</span>
+  </div>
+
+  <div class="ctrl-sep" aria-hidden="true"></div>
+
+  <!-- Mirror Drops Toggle -->
+  <label class="toggle-label" for="toggle-mirror">
+    <span class="label-span">Mirror Drops</span>
+    <div class="toggle-switch">
+      <input type="checkbox" id="toggle-mirror" aria-label="Mirror drops between arenas" />
+      <span class="toggle-slider"></span>
+    </div>
+  </label>
+
+</nav>
+
+<!-- =====================================================
+     COMPARISON MODAL (shown when both arenas complete)
+     ===================================================== -->
+<div
+  class="modal-backdrop hidden"
+  id="comparison-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="modal-title"
+>
+  <div class="modal-card">
+    <div class="modal-header">
+      <div>
+        <h2 class="modal-title" id="modal-title">Protocol Comparison</h2>
+        <p class="modal-subtitle">Both transfers complete — here's how they compare</p>
+      </div>
+      <button class="btn-modal-close" id="modal-close" aria-label="Close comparison modal">
+        ✕ Close
+      </button>
+    </div>
+
+    <table class="comp-table" aria-label="Protocol comparison statistics">
+      <thead>
+        <tr>
+          <th style="text-align:left">Metric</th>
+          <th class="th-gbn">Go-Back-N</th>
+          <th class="th-sr">Sel. Repeat</th>
+        </tr>
+      </thead>
+      <tbody id="comp-tbody">
+        <!-- Populated by main.js -->
+      </tbody>
+    </table>
+
+    <p class="modal-note">
+      Efficiency = unique packets / total transmissions. Higher is better.
+    </p>
+  </div>
+</div>
+
+<!-- =====================================================
+     SCRIPTS  (order matters)
+     ===================================================== -->
+<script src="engine.js"></script>
+<script src="gbn.js"></script>
+<script src="sr.js"></script>
+<script src="main.js"></script>
+
+</body>
+</html>

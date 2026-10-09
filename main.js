@@ -218,6 +218,8 @@
     const rows = [
       { label: 'Total Transmissions', gbn: g.sent ?? '–', sr: s.sent ?? '–' },
       { label: 'Retransmissions',     gbn: g.retransmissions ?? 0, sr: s.retransmissions ?? 0 },
+      { label: 'Timeouts',            gbn: g.timeouts ?? 0, sr: s.timeouts ?? 0 },
+      { label: 'Packets Lost',        gbn: g.lost ?? 0, sr: s.lost ?? 0 },
       { label: 'ACKs Received',       gbn: g.acksReceived ?? '–', sr: s.acksReceived ?? '–' },
       { label: 'Efficiency',          gbn: gEff + '%', sr: sEff + '%' },
     ];

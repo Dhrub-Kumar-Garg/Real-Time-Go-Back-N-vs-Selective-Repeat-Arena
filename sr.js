@@ -58,6 +58,7 @@
         retransmissions: 0,
         acksReceived: 0,
         timeouts: 0,
+        lost: 0,
         delivered: 0,
       },
 
@@ -100,7 +101,7 @@
     dom.deliveredStrip = container.querySelector('.delivered-strip');
     dom.logEl          = container.querySelector('.arena-log');
 
-    ['sent','retransmissions','acks','timeouts','efficiency'].forEach(key => {
+    ['sent','retransmissions','acks','timeouts','lost','efficiency'].forEach(key => {
       dom.statsEls[key] = container.querySelector(`.stat-${key}`);
     });
   }
@@ -212,6 +213,7 @@
       retransmissions: s.retransmissions,
       acks: s.acksReceived,
       timeouts: s.timeouts,
+      lost: s.lost || 0,
       efficiency: eff,
     };
 
@@ -227,18 +229,14 @@
    * ========================================================= */
   function _createPacketEl(pkt) {
     const el = document.createElement('div');
-    el.className = `packet-el pkt-${pkt.kind}`;
+    el.className = `packet-el pkt-${pkt.kind} pkt-disabled`;
     el.textContent = pkt.seq;
     el.dataset.seq = pkt.seq;
     el.dataset.kind = pkt.kind;
     el.dataset.protocol = 'sr';
+    el.title = 'SR loss handling coming next';
 
-    el.addEventListener('click', () => {
-      if (pkt.kind === 'data' && pkt.state === 'in-flight') {
-        dropPacket(pkt.seq);
-      }
-    });
-
+    // In Phase 2: SR remains strictly happy-path
     pkt.element = el;
     return el;
   }
@@ -506,25 +504,11 @@
   }
 
   /**
-   * dropPacket(seq)  –  Phase 2 stub.
-   * @param {number} seq
+   * dropPacket(seq)  –  In Phase 2, SR arena stays happy path.
+   * Packet loss for SR will be implemented in Phase 3.
    */
   function dropPacket(seq) {
-    const pkt = state && state.packets[seq];
-    if (!pkt || pkt.state !== 'in-flight') return;
-    pkt.dropped = true;
-    pkt.state = 'dropped';
-    const el = pkt.element;
-    if (el) {
-      el.classList.add('pkt-dropped');
-      setTimeout(() => el.remove(), 700);
-      pkt.element = null;
-    }
-    _log(`⚡ Packet [${seq}] dropped!`, 'error');
-
-    if (get().SimConfig.mirrorDrops && global.GBN) {
-      global.GBN.dropPacket(seq);
-    }
+    // No-op for SR in Phase 2
   }
 
   global.SR = { init, start, pause, reset, setWindowSize, setSpeed, dropPacket };

@@ -70,8 +70,9 @@
     mirrorDrops: false,  // when true, dropping in one arena drops in the other
 
     // Transit times in simulation-seconds (before speed scaling)
-    propagationDelay: 1.5,  // sender → receiver one-way
-    ackDelay: 1.0,           // receiver → sender one-way (ACKs travel faster visually)
+    propagationDelay: 1.6,  // sender → receiver one-way
+    ackDelay: 1.2,          // receiver → sender one-way
+    txDelay: 0.35,          // inter-packet injection spacing across the link
   };
 
   /* =========================================================
@@ -110,8 +111,9 @@
       this.state = (kind === 'data') ? 'in-flight' : 'ack-flight';
       this.element = null;       // DOM element, set by the renderer
       this.dropped = false;      // Phase 2: marked true when click-dropped
+      this.isRetransmit = false; // Phase 2: true if retransmitted
       this.retransmitCount = 0;  // Phase 2: how many times re-sent
-      // Per-packet timer handle (Phase 2: will be a sim-time deadline)
+      // Per-packet timer handle
       this.timerDeadline = null;
     }
   }
@@ -220,6 +222,22 @@
     window: '#4f9cf9',      // window highlight border
   };
 
+  /**
+   * Shared visual mechanic for click-to-drop (Phase 2 & Phase 3):
+   * Displays an immediate "✕ LOST" burst, halts interaction, and fades out.
+   */
+  function dropPacketVisual(element, labelText = 'LOST', durationMs = 650) {
+    if (!element) return;
+    element.classList.add('pkt-dropped');
+    element.innerHTML = `<span class="pkt-lost-x">✕</span><span class="pkt-lost-tag">${labelText}</span>`;
+    element.style.pointerEvents = 'none';
+    setTimeout(() => {
+      if (element && element.parentNode) {
+        element.remove();
+      }
+    }, durationMs);
+  }
+
   /* =========================================================
    * 7. PROTOCOL INTERFACE CONTRACT
    * Each protocol file (gbn.js, sr.js) must export an object
@@ -232,7 +250,7 @@
    *   reset()                    – reset to initial state
    *   setWindowSize(n: number)   – live update (no restart needed)
    *   setSpeed(x: number)        – pass-through to SimConfig
-   *   dropPacket(seq: number)    – Phase 2: forcibly drop a packet
+   *   dropPacket(seq: number, kind?: string) – drop a packet
    * }
    *
    * Events emitted via EventBus (protocol is 'gbn' or 'sr'):
@@ -254,6 +272,7 @@
     fmt1,
     clamp,
     Colors,
+    dropPacketVisual,
   };
 
 })(window);

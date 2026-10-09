@@ -106,6 +106,10 @@
             <span class="stat-value stat-timeouts" aria-live="polite">0</span>
           </div>
           <div class="stat-chip">
+            <span class="stat-label">Lost</span>
+            <span class="stat-value stat-lost" aria-live="polite">0</span>
+          </div>
+          <div class="stat-chip">
             <span class="stat-label">Efficiency</span>
             <span class="stat-value stat-efficiency" aria-live="polite">–</span>
           </div>
@@ -116,8 +120,17 @@
       <div class="arena-body">
 
         <!-- Sender box -->
-        <div class="endpoint-box sender-box" role="region" aria-label="GBN Sender">
-          <div class="endpoint-label">Sender</div>
+        <div class="endpoint-box sender-box" id="gbn-sender-box" role="region" aria-label="GBN Sender">
+          <div class="endpoint-header-row">
+            <div class="endpoint-label">Sender</div>
+            <!-- Base packet ACK timer progress -->
+            <div class="sender-timer-wrap" id="gbn-timer-wrap" title="Oldest unACKed packet (base) timer">
+              <span class="timer-label">Base Timer</span>
+              <div class="timer-bar-track">
+                <div class="timer-bar-fill" id="gbn-timer-fill"></div>
+              </div>
+            </div>
+          </div>
           <div class="window-label">Sender Window</div>
           <div class="sender-window" aria-label="Sliding window cells"></div>
         </div>
@@ -144,6 +157,9 @@
               <span>Expecting seq</span>
               <span class="expected-seq-value" aria-live="polite">0</span>
             </div>
+            <div class="discard-alert hidden" id="gbn-discard-alert" aria-live="polite">
+              Out of order &mdash; Discarded!
+            </div>
             <div class="delivered-label">Delivered</div>
             <div class="delivered-strip" aria-label="Delivered packets"></div>
           </div>
@@ -156,6 +172,9 @@
         <div class="log-title">Event Log</div>
         <div class="arena-log" role="log" aria-label="GBN event log" aria-live="polite"></div>
       </div>
+
+      <!-- Timeout Toast Banner -->
+      <div class="arena-toast hidden" id="gbn-toast" role="alert" aria-live="assertive"></div>
 
       <!-- Done overlay (hidden until simulation finishes) -->
       <div class="done-overlay hidden" aria-hidden="true">
@@ -202,6 +221,10 @@
           <div class="stat-chip">
             <span class="stat-label">Timeouts</span>
             <span class="stat-value stat-timeouts" aria-live="polite">0</span>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">Lost</span>
+            <span class="stat-value stat-lost" aria-live="polite">0</span>
           </div>
           <div class="stat-chip">
             <span class="stat-label">Efficiency</span>

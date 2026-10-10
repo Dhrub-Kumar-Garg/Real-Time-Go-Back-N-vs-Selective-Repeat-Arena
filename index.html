@@ -237,7 +237,7 @@
       <div class="arena-body">
 
         <!-- Sender box -->
-        <div class="endpoint-box sender-box" role="region" aria-label="SR Sender">
+        <div class="endpoint-box sender-box" id="sr-sender-box" role="region" aria-label="SR Sender">
           <div class="endpoint-label">Sender</div>
           <div class="window-label">Sender Window</div>
           <div class="sender-window" aria-label="Sliding window cells"></div>
@@ -261,7 +261,7 @@
         <div class="endpoint-box receiver-box" role="region" aria-label="SR Receiver">
           <div class="endpoint-label">Receiver</div>
           <div class="receiver-info">
-            <div class="buffer-label">Receive Buffer</div>
+            <div class="buffer-label">Receive Buffer <span class="rcv-win-range" id="sr-rcv-win">[0..3]</span></div>
             <div class="buffer-array" aria-label="Receive buffer slots"></div>
             <div class="delivered-label">Delivered</div>
             <div class="delivered-strip" aria-label="Delivered packets"></div>
@@ -275,6 +275,9 @@
         <div class="log-title">Event Log</div>
         <div class="arena-log" role="log" aria-label="SR event log" aria-live="polite"></div>
       </div>
+
+      <!-- Toast Banner for SR timeouts & buffer flushes -->
+      <div class="arena-toast hidden" id="sr-toast" role="alert" aria-live="assertive"></div>
 
       <!-- Done overlay -->
       <div class="done-overlay hidden" aria-hidden="true">

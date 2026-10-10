@@ -22,81 +22,74 @@
 cn_project/
 ├── index.html     # Semantic layout: header, legend, dual arenas, controls bar, comparison modal
 ├── styles.css     # Design system: dark glassmorphism theme, CSS tokens, animations, responsive rules
-├── engine.js      # Shared simulation infrastructure: EventBus, SimClock (rAF + dt), SimConfig, Packet model
-├── gbn.js         # Go-Back-N protocol logic: cumulative ACKs, timer gauge, drop loss & timeout recovery
-├── sr.js          # Selective Repeat protocol logic: individual ACKs, out-of-order buffer (loss coming in Phase 3)
+├── engine.js      # Shared simulation infrastructure: EventBus, SimClock (rAF + dt), SimConfig, Packet model, dropPacketVisual
+├── gbn.js         # Go-Back-N protocol logic: cumulative ACKs, single base timer gauge, drop loss & window recovery
+├── sr.js          # Selective Repeat protocol logic: individual ACKs, per-packet timers, receiver buffer & flush, selective recovery
 ├── main.js        # UI wiring: global controls, sliders, event orchestration, comparison modal
-└── README.md      # Project documentation and viva quick-reference
+└── README.md      # Project documentation, viva quick-reference, and comparison guide
 ```
 
 ---
 
-## ⚡ Phase 2: Go-Back-N Packet Loss & Recovery
+## ⚡ Protocol Implementation Details
 
-In this phase, full interactive packet-loss and recovery mechanics are implemented for **Go-Back-N**:
+### Go-Back-N (GBN) Mechanics
+- **Cumulative ACKs**: `ACK(n)` acknowledges all packets up to sequence $n$.
+- **Single Base Timer**: One logical timer monitors the oldest unACKed packet (`base`).
+- **Receiver Discard**: Discards all out-of-order arrivals; re-sends duplicate cumulative ACK for the last in-order packet.
+- **Window Retransmission**: On timeout of `base`, retransmits the entire window $[base..nextSeq-1]$ in order.
 
-### 1. Click-to-Drop Interaction
-- Any **DATA packet** in flight in the GBN arena is clickable with an expanded hit target.
-- Clicking drops the packet in transit: it triggers an immediate **✕ LOST** red burst and is removed from the network channel. It never reaches the receiver.
-- Any **ACK packet** is also clickable to drop: demonstrates that **cumulative ACKs** make GBN resilient to lost ACKs when subsequent ACKs arrive in time.
-- All drops increment the live **Lost** stat counter.
+### Selective Repeat (SR) Mechanics (Phase 3)
+- **Individual ACKs**: `ACK(n)` acknowledges *only* packet $n$ without cumulative side effects.
+- **Independent Per-Packet Timers**: Every unACKed packet in flight maintains its own independent timer running in simulation time (scales with Speed and freezes on Pause).
+- **Per-Cell Visual Timer Gauges**: Each window cell displays an independent mini timer bar that drains smoothly and turns amber/red near expiry. Cells ahead of a gap turn solid green (`ACKed`) while earlier cells are still waiting.
+- **Receiver Buffering**: Out-of-order packets falling inside receiver window $[rcvBase..rcvBase + W - 1]$ are stored in the visual Receive Buffer (purple chips), leaving earlier missing slots visibly empty (dashed outline).
+- **In-Order Buffer Flush**: When the missing gap arrives at `rcvBase`, the receiver flushes all consecutive buffered packets in order to the delivered strip, displaying a notification toast (e.g. `Packet 1 arrived — delivered 1, 2, 3 in order`), and slides `rcvBase`.
+- **Selective Retransmission**: On timeout of packet $n$, the sender retransmits **only** packet $n$ (amber, `RETX` badge) and restarts only its timer.
+- **Duplicate Delivery Prevention**: If an ACK is lost and packet $n \in [rcvBase - W..rcvBase - 1]$ is resent, the receiver immediately re-sends `ACK(n)` without buffering or delivering it again.
 
-### 2. Textbook-Correct GBN Sender Logic (Kurose & Ross)
-- **Single Logical Timer**: A countdown timer protects the oldest unACKed packet (`base`).
-- **Dynamic Visual Gauge**: A live timer bar on the Sender box drains continuously in simulation time, turning from blue to amber and pulsing red near expiration.
-- **Timer Rules**:
-  - Starts when `base` is transmitted.
-  - Restarts when `base` advances (if there are still unACKed packets in flight).
-  - Stops when `base == nextSeq` (all sent packets have been acknowledged).
-- **Timeout Retransmission**:
-  - When the timer expires, the sender retransmits **all packets in the current window** (`[base..nextSeq - 1]`) in order.
-  - Retransmitted packets are styled in **amber** with an explicit **`RETX`** tag.
-  - A prominent toast banner appears: `⚠️ TIMEOUT on packet X — Go-Back-N resending [X..Y]` and the sender box pulses with an amber glow.
-  - The sender timer restarts immediately for the resubmitted window.
+---
 
-### 3. Textbook-Correct GBN Receiver Logic
-- Maintains `expectedSeq`.
-- **In-Order Arrival**: If packet sequence matches `expectedSeq`, it is delivered, `expectedSeq` advances, and a green cumulative ACK is sent.
-- **Out-of-Order Arrival**: If an earlier packet was lost, all subsequent packets arriving at the receiver are **visibly discarded** (purple-grey fade animation and discard alert).
-- The receiver re-sends a **duplicate cumulative ACK** for the last in-order received packet (`expectedSeq - 1`). If no packet has been delivered yet, no ACK is generated.
+## 📊 Go-Back-N vs. Selective Repeat Comparison Table
+
+| Metric / Feature | Go-Back-N (GBN) | Selective Repeat (SR) |
+| :--- | :--- | :--- |
+| **ACK Semantic** | **Cumulative**: `ACK(n)` acknowledges all packets $\le n$. | **Individual**: `ACK(n)` acknowledges *only* packet $n$. |
+| **Receiver Buffering** | **None**: Out-of-order packets are discarded immediately. | **Yes**: Out-of-order packets are buffered until gaps fill. |
+| **Timer Architecture** | **1 Logical Timer** running for the oldest unACKed packet (`base`). | **$N$ Independent Timers**, one per unACKed packet in flight. |
+| **Retransmission Scope** | Retransmits **all packets** in current window $[base..nextSeq-1]$. | Retransmits **only the single lost packet**. |
+| **Bandwidth Efficiency under Loss** | Lower (redundant retransmissions consume channel bandwidth). | **Higher** (only genuinely lost packets are retransmitted). |
+| **Receiver Complexity** | Simple (only tracks `expectedSeq`). | Moderate (maintains buffer map, window bounds, and delivery prefix). |
+| **Maximum Window Size** | $W \le 2^m - 1$ ($m$ sequence bit width). | $W \le 2^{m-1}$ (prevents overlap of old and new windows). |
+| **Resilience to Lost ACKs** | High (subsequent cumulative ACK can acknowledge previous packets). | Requires re-ACKing already delivered packets upon retransmission. |
 
 ---
 
 ## 🎓 Viva Demonstration Walkthrough
 
-Follow this step-by-step demo during a viva or presentation:
+Follow these scenarios during a live viva or professor demonstration:
 
-1. **Initial Setup**: Keep default settings ($W=4$, 12 packets, Speed 1.0x, Timeout 3.0s). Click **▶ Play**.
-2. **Induce Packet Loss**: While packets `0, 1, 2, 3` are traveling across the top lane, click packet **1** to drop it.
-3. **Observe Receiver Discard**:
-   - Packet **0** arrives, is accepted, and triggers **ACK 0**.
-   - Packet **1** was lost in transit.
-   - Packets **2** and **3** reach the receiver out of order: both are discarded, flashing the discard alert, and triggering **duplicate ACK 0**.
-4. **Observe Sender Timeout & Recovery**:
-   - The Sender's Base Timer drains and expires.
-   - The toast banner announces: `TIMEOUT on packet 1 — Go-Back-N resending [1..3]`.
-   - The sender window cells turn amber, and packets `1, 2, 3` are resent in amber with `RETX` badges.
-   - Upon arrival at the receiver, packet `1` is accepted (`expectedSeq` advances to 2), then `2` is accepted, then `3`, and the transfer resumes smoothly to completion!
+### Scenario A: Selective Repeat Recovery vs. GBN Window Retransmission
+1. Set Window Size to **4**, Total Packets to **12**, Speed to **1.0x**.
+2. Click **▶ Play**.
+3. While packets `0, 1, 2, 3` are in flight across both arenas, click **packet 1** in both arenas to drop it.
+4. **Compare the outcomes**:
+   - **In GBN**: Packet 0 delivers. Packets 2 and 3 arrive and are **discarded**. The timer on packet 1 expires, and GBN retransmits **all 3 packets** (`1, 2, 3`).
+   - **In SR**: Packet 0 delivers. Packets 2 and 3 arrive and are **buffered in purple slots** (slot 1 stays dashed/empty). Individual ACKs 2 and 3 return to sender, turning cells 2 and 3 **green** while cell 1 remains blue/amber. Only packet 1's timer expires. The sender retransmits **ONLY packet 1**. When packet 1 arrives, the receiver delivers `1, 2, 3` in order, flushes the buffer, and sender base jumps directly to 4!
+5. Notice that SR achieves higher efficiency and lower packet retransmission count.
 
----
-
-## 🧠 Key Theoretical Concepts (Viva Prep)
-
-| Concept | Go-Back-N (GBN) | Selective Repeat (SR) |
-| :--- | :--- | :--- |
-| **ACK Type** | Cumulative: `ACK(n)` acknowledges all packets up to sequence `n`. | Individual: `ACK(n)` acknowledges only packet `n`. |
-| **Receiver Buffering** | Discards out-of-order packets. Accepts only `expectedSeq`. | Buffers out-of-order packets in a receive window and flushes in-order prefixes. |
-| **Sender Window Size ($W$)** | Up to $2^m - 1$ where $m$ is sequence bit width. | Up to $2^{m-1}$ to prevent sequence number ambiguity between old and new windows. |
-| **Retransmission Scope** | Retransmits the entire window starting from the oldest unACKed packet. | Retransmits *only* the specific timed-out packet. |
-| **Timer Count** | 1 logical timer (for `base`). | 1 timer per unACKed packet. |
-| **Receiver Window** | Size = 1. | Size = Sender Window ($W$). |
+### Scenario B: Lost ACK Resilience
+1. In the SR arena, click an **ACK packet** (e.g. ACK 2) in flight to drop it.
+2. Observe that sender times out on packet 2 and retransmits ONLY packet 2.
+3. The receiver notices packet 2 is already delivered, sends an individual `ACK 2` again, and does **not** duplicate delivery.
+4. The sender receives the re-ACK and marks packet 2 acknowledged.
 
 ---
 
-## 🎨 Color-Coded Semantic Visual Language
+## 🎨 Semantic Visual Language
 
-- 🔵 **Blue**: First-transmission DATA packet in flight
-- 🟢 **Green**: Cumulative ACK packet returning to sender
-- 🟡 **Amber**: Retransmitted DATA packet with `RETX` tag / Timeout countdown
-- 🔴 **Red**: Dropped packet / timer critical warning
-- 🟣 **Purple-Grey**: Out-of-order discarded packet at receiver
+- 🔵 **Blue**: First-transmission DATA packet in flight / in-flight sender window cell
+- 🟢 **Green**: ACK packet returning to sender / acknowledged window cell
+- 🟡 **Amber**: Retransmitted DATA packet with `RETX` tag / timeout countdown gauge & pulse
+- 🔴 **Red**: Dropped packet with `✕ LOST` burst / critical timer state
+- 🟣 **Purple**: Out-of-order buffered packet in SR Receive Buffer / GBN discarded packet alert

@@ -31,6 +31,7 @@
     on(event, callback) {
       if (!this._listeners[event]) this._listeners[event] = [];
       this._listeners[event].push(callback);
+      return () => this.off(event, callback);
     },
 
     /**
@@ -67,7 +68,7 @@
     speed: 1.0,          // multiplier applied to SimClock
     timeoutDuration: 3.0,// seconds (simulation time) before retransmit
     totalPackets: 12,    // total distinct data packets to deliver
-    mirrorDrops: false,  // when true, dropping in one arena drops in the other
+    mirrorDrops: true,   // when true, dropping DATA packet in one arena mirrors to the other
 
     // Transit times in simulation-seconds (before speed scaling)
     propagationDelay: 1.6,  // sender → receiver one-way
@@ -239,34 +240,115 @@
   }
 
   /* =========================================================
-   * 7. PROTOCOL INTERFACE CONTRACT
+   * 7. SOUND EFFECTS (Web Audio API – Pure Synthesis, No Files)
+   * ========================================================= */
+  const Sound = {
+    enabled: false,
+    _ctx: null,
+
+    _getCtx() {
+      if (!this._ctx && (typeof window !== 'undefined') && (window.AudioContext || window.webkitAudioContext)) {
+        try {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          this._ctx = new AudioCtx();
+        } catch (e) {}
+      }
+      if (this._ctx && this._ctx.state === 'suspended') {
+        this._ctx.resume().catch(() => {});
+      }
+      return this._ctx;
+    },
+
+    toggle() {
+      this.enabled = !this.enabled;
+      if (this.enabled) {
+        this._getCtx();
+        this.play('ack');
+      }
+      EventBus.emit('sound:toggled', { enabled: this.enabled });
+      return this.enabled;
+    },
+
+    play(type) {
+      if (!this.enabled) return;
+      const ctx = this._getCtx();
+      if (!ctx) return;
+
+      try {
+        const now = ctx.currentTime;
+        if (type === 'send') {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(540, now);
+          osc.frequency.exponentialRampToValueAtTime(720, now + 0.04);
+          gain.gain.setValueAtTime(0.04, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.045);
+        } else if (type === 'ack') {
+          const osc1 = ctx.createOscillator();
+          const osc2 = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc1.type = 'sine';
+          osc2.type = 'triangle';
+          osc1.frequency.setValueAtTime(659.25, now);
+          osc2.frequency.setValueAtTime(880.00, now);
+          gain.gain.setValueAtTime(0.04, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+          osc1.connect(gain);
+          osc2.connect(gain);
+          gain.connect(ctx.destination);
+          osc1.start(now);
+          osc2.start(now);
+          osc1.stop(now + 0.1);
+          osc2.stop(now + 0.1);
+        } else if (type === 'loss') {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(220, now);
+          osc.frequency.exponentialRampToValueAtTime(70, now + 0.09);
+          gain.gain.setValueAtTime(0.07, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.095);
+        } else if (type === 'timeout') {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(440, now);
+          osc.frequency.setValueAtTime(330, now + 0.06);
+          gain.gain.setValueAtTime(0.03, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.145);
+        }
+      } catch (err) {}
+    }
+  };
+
+  /* =========================================================
+   * 8. PROTOCOL INTERFACE CONTRACT
    * Each protocol file (gbn.js, sr.js) must export an object
    * conforming to this interface onto window.GBN / window.SR.
-   *
-   * interface Protocol {
-   *   init(containerElement)     – one-time DOM setup
-   *   start()                    – begin / resume simulation
-   *   pause()                    – pause simulation
-   *   reset()                    – reset to initial state
-   *   setWindowSize(n: number)   – live update (no restart needed)
-   *   setSpeed(x: number)        – pass-through to SimConfig
-   *   dropPacket(seq: number, kind?: string) – drop a packet
-   * }
-   *
-   * Events emitted via EventBus (protocol is 'gbn' or 'sr'):
-   *   `{protocol}:stat`  – { key, value }  e.g. { key:'retransmissions', value:3 }
-   *   `{protocol}:log`   – { message, type }  type ∈ 'info'|'success'|'warn'|'error'
-   *   `{protocol}:done`  – emitted when all packets delivered
    * ========================================================= */
 
   /* =========================================================
-   * 8. EXPORT onto window.Engine
+   * 9. EXPORT onto window.Engine
    * ========================================================= */
   global.Engine = {
     EventBus,
     SimConfig,
     SimClock,
     Packet,
+    Sound,
     lerp,
     easeInOut,
     fmt1,

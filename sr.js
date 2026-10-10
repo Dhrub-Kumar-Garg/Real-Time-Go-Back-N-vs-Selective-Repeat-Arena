@@ -87,7 +87,12 @@
         timeouts: 0,           // individual packet timeouts
         lost: 0,               // packets/ACKs dropped by user
         delivered: 0,          // unique packets delivered
+        wasted: 0,             // packets discarded / redundant transmissions
       },
+
+      // Scheduled mirrored drops
+      scheduledDrops: new Set(),
+      completionTime: null,
 
       // Status flags
       done: false,
@@ -194,7 +199,9 @@
       acks: s.acksReceived,
       timeouts: s.timeouts,
       lost: s.lost,
+      wasted: s.wasted || 0,
       efficiency: eff,
+      completionTime: state.completionTime,
     };
 
     Object.entries(vals).forEach(([key, val]) => {
@@ -403,8 +410,24 @@
 
     state.stats.sent++;
     _log(`[SEND] Sent DATA[${seq}]`, 'send');
+    if (get().Sound) get().Sound.play('send');
     _updateStats();
     _renderWindowCells();
+
+    // Check if a mirrored drop was scheduled for this sequence
+    if (state.scheduledDrops.has(seq)) {
+      state.scheduledDrops.delete(seq);
+      el.classList.add('pkt-mirror-target');
+      const badge = document.createElement('span');
+      badge.className = 'pkt-mirror-badge';
+      badge.textContent = 'LINKED';
+      el.appendChild(badge);
+      setTimeout(() => {
+        if (state && state.packets[seq] && state.packets[seq].state === 'in-flight' && !state.packets[seq].dropped) {
+          dropPacket(seq, 'data', true);
+        }
+      }, 240);
+    }
   }
 
   /* =========================================================
@@ -456,6 +479,7 @@
     state.stats.sent++;
     state.stats.retransmissions++;
     _log(`[RETX] Resent DATA[${seq}] (Selective Repeat recovery)`, 'retx');
+    if (get().Sound) get().Sound.play('send');
     _updateStats();
     _renderWindowCells();
   }
@@ -495,6 +519,7 @@
     } else {
       _log(`[ACK] Sent individual ACK[${seq}]`, 'ack');
     }
+    if (get().Sound) get().Sound.play('ack');
   }
 
   /* =========================================================
@@ -502,6 +527,7 @@
    * ========================================================= */
   function _handleTimeout(seq, simTime) {
     state.stats.timeouts++;
+    if (get().Sound) get().Sound.play('timeout');
     const rec = state.records[seq];
 
     _log(`[TIMEOUT] Timer expired for packet ${seq} – SR retransmitting ONLY packet ${seq}`, 'timeout');
@@ -540,21 +566,52 @@
    * CLICK-TO-DROP INTERACTION
    * Shared visual mechanic via Engine.dropPacketVisual
    * ========================================================= */
-  function dropPacket(seq, kind = 'data') {
+  function dropPacket(seq, kind = 'data', isMirror = false) {
+    if (kind === 'ack') {
+      const ack = state && state.acks.find(a => (seq === undefined || a.seq === seq) && a.state === 'ack-flight' && !a.dropped);
+      if (ack) {
+        dropAck(ack);
+        return;
+      }
+    }
+
     const pkt = state && state.packets[seq];
-    if (!pkt || pkt.state !== 'in-flight' || pkt.dropped) return;
+    if (!pkt || pkt.state !== 'in-flight' || pkt.dropped) {
+      if (isMirror && state) {
+        state.scheduledDrops.add(seq);
+      }
+      return;
+    }
 
     pkt.dropped = true;
     pkt.state = 'dropped';
     state.stats.lost++;
     _updateStats();
 
-    _log(`[LOST] Packet DATA[${seq}] dropped in transit!`, 'lost');
+    if (isMirror) {
+      _log(`[LOST] (Mirrored) Packet DATA[${seq}] dropped in transit!`, 'lost');
+    } else {
+      _log(`[LOST] Packet DATA[${seq}] dropped in transit!`, 'lost');
+      if (kind === 'data' && get().SimConfig.mirrorDrops) {
+        get().EventBus.emit('mirror:drop', { source: 'sr', seq, kind: 'data' });
+      }
+    }
+
+    if (get().Sound) get().Sound.play('loss');
 
     const el = pkt.element;
     pkt.element = null;
     if (el) {
-      get().dropPacketVisual(el, 'LOST');
+      if (isMirror) {
+        el.classList.add('pkt-mirror-target');
+        const badge = document.createElement('span');
+        badge.className = 'pkt-mirror-badge';
+        badge.textContent = 'LINKED';
+        el.appendChild(badge);
+        setTimeout(() => get().dropPacketVisual(el, 'LOST'), 160);
+      } else {
+        get().dropPacketVisual(el, 'LOST');
+      }
     }
   }
 
@@ -567,6 +624,7 @@
     _updateStats();
 
     _log(`[LOST] Individual ACK[${ack.seq}] dropped in transit! (Sender will time out on packet ${ack.seq})`, 'lost');
+    if (get().Sound) get().Sound.play('loss');
 
     const el = ack.element;
     ack.element = null;
@@ -637,9 +695,10 @@
   function _finish(simTime) {
     if (state.done) return;
     state.done = true;
+    state.completionTime = simTime;
     _log(`✅ Transfer complete! Total sent: ${state.stats.sent}, Retransmissions: ${state.stats.retransmissions}`, 'success');
     _updateStats();
-    get().EventBus.emit('sr:done', { stats: state.stats });
+    get().EventBus.emit('sr:done', { stats: state.stats, completionTime: simTime });
 
     const overlay = state.container ? state.container.querySelector('.done-overlay') : null;
     if (overlay) overlay.classList.remove('hidden');
@@ -736,6 +795,7 @@
         // CASE 2: Inside [rcvBase - windowSize .. rcvBase - 1] (already delivered)
         else if (seq < state.rcvBase || state.deliveredSet.has(seq)) {
           // Sender timed out because our previous ACK was lost; re-ACK without re-delivering
+          state.stats.wasted = (state.stats.wasted || 0) + 1;
           _log(`[DUP-ACK] Received DATA[${seq}] (already delivered) – re-sending ACK[${seq}]`, 'dupack');
           _sendAck(seq, simTime, true);
         }
@@ -881,20 +941,20 @@
     get().SimConfig.speed = x;
   }
 
-  /**
-   * dropPacket(seq, kind)
-   * Public hook to drop in-flight data packet or ACK by sequence number.
-   */
-  function dropPacketExternal(seq, kind = 'data') {
-    if (kind === 'data') {
-      dropPacket(seq, 'data');
+  function scheduleDrop(seq) {
+    if (!state) return;
+    if (state.packets[seq] && state.packets[seq].state === 'in-flight' && !state.packets[seq].dropped) {
+      dropPacket(seq, 'data', true);
     } else {
-      const inFlightAck = state && state.acks.find(a => a.seq === seq && a.state === 'ack-flight' && !a.dropped);
-      if (inFlightAck) {
-        dropAck(inFlightAck);
-      }
+      state.scheduledDrops.add(seq);
     }
   }
+
+  // Cross-arena mirror drop listener
+  get().EventBus.on('mirror:drop', (data) => {
+    if (!data || data.source === 'sr' || data.kind !== 'data') return;
+    scheduleDrop(data.seq);
+  });
 
   global.SR = {
     init,
@@ -903,7 +963,9 @@
     reset,
     setWindowSize,
     setSpeed,
-    dropPacket: dropPacketExternal,
+    dropPacket,
+    dropAck,
+    scheduleDrop,
   };
 
 })(window);

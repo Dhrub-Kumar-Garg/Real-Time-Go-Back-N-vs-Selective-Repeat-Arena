@@ -10,11 +10,11 @@
   <link rel="stylesheet" href="styles.css" />
 
   <!--
-    Script load order matters:
-      1. engine.js   — shared helpers, EventBus, SimClock, SimConfig
+    Script load order:
+      1. engine.js   — shared helpers, EventBus, SimClock, SimConfig, Sound
       2. gbn.js      — Go-Back-N protocol (uses Engine)
       3. sr.js       — Selective Repeat protocol (uses Engine)
-      4. main.js     — wiring + DOMContentLoaded init
+      4. main.js     — wiring, scoreboard, guided demo, shortcuts, modals
   -->
 </head>
 <body>
@@ -29,8 +29,25 @@
       <h1 class="site-title">Go-Back-N vs. Selective Repeat Arena</h1>
       <p class="site-subtitle">Real-time side-by-side sliding-window protocol visualiser</p>
     </div>
-    <div class="module-badge" aria-label="Course module">
-      Module 3 &mdash; Data Link Layer
+    <div class="header-actions">
+      <button class="btn-hdr btn-hdr-demo" id="btn-guided-demo" title="Start scripted guided walkthrough (Key: D)">
+        ✨ Guided Demo
+      </button>
+      <button class="btn-hdr" id="btn-explainer" title="Protocol theory comparison and window diagrams">
+        📖 How It Works
+      </button>
+      <button class="btn-hdr" id="btn-presentation" title="Toggle large projector view (Key: P)">
+        🖥️ Presentation
+      </button>
+      <button class="btn-hdr" id="btn-sound" title="Toggle synthesized sound effects (Key: S)">
+        🔇 Sound
+      </button>
+      <button class="btn-hdr" id="btn-shortcuts" title="Keyboard shortcuts list (Key: ?)">
+        ⌨️ Shortcuts
+      </button>
+      <div class="module-badge" aria-label="Course module">
+        Module 3 &mdash; Data Link Layer
+      </div>
     </div>
   </header>
 
@@ -67,7 +84,34 @@
   </div>
 
   <!-- =====================================================
-       MAIN CONTENT — TWO ARENA CARDS
+       WELCOME HINT (dismisses on first interaction)
+       ===================================================== -->
+  <div class="welcome-hint" id="welcome-hint" role="status">
+    <span class="hint-icon">👋</span>
+    <span>Click <strong>▶ Play</strong> or press <strong>Space</strong> to start, then click any moving packet to drop it and compare recovery!</span>
+    <button class="btn-hint-dismiss" id="btn-hint-dismiss" aria-label="Dismiss hint">✕</button>
+  </div>
+
+  <!-- =====================================================
+       GUIDED DEMO NARRATION BAR (shown in Demo Mode)
+       ===================================================== -->
+  <div class="guided-narration-bar hidden" id="guided-narration-bar" role="region" aria-label="Guided Demo Narration">
+    <div class="guided-step-badge">
+      <span class="pulse-indicator"></span>
+      <span id="demo-step-num">Step 1 / 7</span>
+    </div>
+    <div class="guided-narration-text" id="demo-narration-text">
+      Welcome to the Guided Demo! Both senders are transmitting initial packets across the channel.
+    </div>
+    <div class="guided-controls">
+      <button class="btn-demo-ctrl" id="btn-demo-pause" title="Pause or resume demo playback">⏸ Pause</button>
+      <button class="btn-demo-ctrl" id="btn-demo-next" title="Advance to next scripted step">⏭ Next</button>
+      <button class="btn-demo-ctrl btn-demo-exit" id="btn-demo-exit" title="Exit guided demo and return to free play">✕ Exit</button>
+    </div>
+  </div>
+
+  <!-- =====================================================
+       MAIN CONTENT — DUAL ARENAS + LIVE SCOREBOARD
        ===================================================== -->
   <main class="main-content" role="main">
 
@@ -189,6 +233,134 @@
 
 
     <!-- ─────────────────────────────────────────────────
+         LIVE COMPARISON SCOREBOARD
+         ───────────────────────────────────────────────── -->
+    <section class="live-scoreboard-panel" id="live-scoreboard" aria-label="GBN vs SR Live Scoreboard">
+      <div class="scoreboard-header">
+        <div class="scoreboard-title-wrap">
+          <span class="scoreboard-icon">⚡</span>
+          <h3 class="scoreboard-title">GBN vs. SR &mdash; Live Scoreboard</h3>
+          <span class="scoreboard-pill">Real-Time Comparison</span>
+        </div>
+        <div class="scoreboard-verdict" id="scoreboard-verdict">
+          <span class="verdict-icon">⚖️</span>
+          <span class="verdict-text" id="verdict-text">Run both protocols to see real-time efficiency metrics</span>
+        </div>
+      </div>
+
+      <div class="scoreboard-grid">
+        <!-- 1. Total Transmissions -->
+        <div class="score-card" id="card-transmissions">
+          <div class="score-metric-name">Total Transmissions</div>
+          <div class="score-rows">
+            <div class="score-row score-gbn" id="row-gbn-sent">
+              <span class="score-tag">GBN</span>
+              <span class="score-val" id="sc-gbn-sent">0</span>
+              <span class="score-crown hidden" id="cr-gbn-sent">👑</span>
+            </div>
+            <div class="score-row score-sr" id="row-sr-sent">
+              <span class="score-tag">SR</span>
+              <span class="score-val" id="sc-sr-sent">0</span>
+              <span class="score-crown hidden" id="cr-sr-sent">👑</span>
+            </div>
+          </div>
+          <div class="score-diff" id="diff-sent">&ndash;</div>
+        </div>
+
+        <!-- 2. Retransmissions -->
+        <div class="score-card" id="card-retx">
+          <div class="score-metric-name">Retransmissions</div>
+          <div class="score-rows">
+            <div class="score-row score-gbn" id="row-gbn-retx">
+              <span class="score-tag">GBN</span>
+              <span class="score-val" id="sc-gbn-retx">0</span>
+              <span class="score-crown hidden" id="cr-gbn-retx">👑</span>
+            </div>
+            <div class="score-row score-sr" id="row-sr-retx">
+              <span class="score-tag">SR</span>
+              <span class="score-val" id="sc-sr-retx">0</span>
+              <span class="score-crown hidden" id="cr-sr-retx">👑</span>
+            </div>
+          </div>
+          <div class="score-diff" id="diff-retx">&ndash;</div>
+        </div>
+
+        <!-- 3. Wasted Bandwidth -->
+        <div class="score-card" id="card-wasted">
+          <div class="score-metric-name">Wasted Bandwidth</div>
+          <div class="score-rows">
+            <div class="score-row score-gbn" id="row-gbn-wasted">
+              <span class="score-tag">GBN</span>
+              <span class="score-val" id="sc-gbn-wasted">0</span>
+              <span class="score-crown hidden" id="cr-gbn-wasted">👑</span>
+            </div>
+            <div class="score-row score-sr" id="row-sr-wasted">
+              <span class="score-tag">SR</span>
+              <span class="score-val" id="sc-sr-wasted">0</span>
+              <span class="score-crown hidden" id="cr-sr-wasted">👑</span>
+            </div>
+          </div>
+          <div class="score-diff" id="diff-wasted">&ndash;</div>
+        </div>
+
+        <!-- 4. Time to Complete -->
+        <div class="score-card" id="card-time">
+          <div class="score-metric-name">Completion Time</div>
+          <div class="score-rows">
+            <div class="score-row score-gbn" id="row-gbn-time">
+              <span class="score-tag">GBN</span>
+              <span class="score-val" id="sc-gbn-time">0.0s</span>
+              <span class="score-crown hidden" id="cr-gbn-time">👑</span>
+            </div>
+            <div class="score-row score-sr" id="row-sr-time">
+              <span class="score-tag">SR</span>
+              <span class="score-val" id="sc-sr-time">0.0s</span>
+              <span class="score-crown hidden" id="cr-sr-time">👑</span>
+            </div>
+          </div>
+          <div class="score-diff" id="diff-time">&ndash;</div>
+        </div>
+
+        <!-- 5. Efficiency % -->
+        <div class="score-card" id="card-efficiency">
+          <div class="score-metric-name">Channel Efficiency</div>
+          <div class="score-rows">
+            <div class="score-row score-gbn" id="row-gbn-eff">
+              <span class="score-tag">GBN</span>
+              <span class="score-val" id="sc-gbn-eff">&ndash;</span>
+              <span class="score-crown hidden" id="cr-gbn-eff">👑</span>
+            </div>
+            <div class="score-row score-sr" id="row-sr-eff">
+              <span class="score-tag">SR</span>
+              <span class="score-val" id="sc-sr-eff">&ndash;</span>
+              <span class="score-crown hidden" id="cr-sr-eff">👑</span>
+            </div>
+          </div>
+          <div class="score-diff" id="diff-eff">&ndash;</div>
+        </div>
+
+        <!-- 6. Packets Lost -->
+        <div class="score-card" id="card-lost">
+          <div class="score-metric-name">Packets Lost</div>
+          <div class="score-rows">
+            <div class="score-row score-gbn" id="row-gbn-lost">
+              <span class="score-tag">GBN</span>
+              <span class="score-val" id="sc-gbn-lost">0</span>
+              <span class="score-crown hidden" id="cr-gbn-lost">✓</span>
+            </div>
+            <div class="score-row score-sr" id="row-sr-lost">
+              <span class="score-tag">SR</span>
+              <span class="score-val" id="sc-sr-lost">0</span>
+              <span class="score-crown hidden" id="cr-sr-lost">✓</span>
+            </div>
+          </div>
+          <div class="score-diff" id="diff-lost">&ndash;</div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ─────────────────────────────────────────────────
          ARENA 2: SELECTIVE REPEAT
          ───────────────────────────────────────────────── -->
     <section class="arena-card arena-sr" id="arena-sr"
@@ -292,6 +464,21 @@
 
   </main><!-- /main-content -->
 
+  <!-- =====================================================
+       STUDENT INFO FOOTER
+       ===================================================== -->
+  <footer class="site-footer" id="site-footer" role="contentinfo">
+    <div class="footer-meta">
+      <span class="meta-item"><strong>Student:</strong> <span id="student-name">Arushi Pahuja</span></span>
+      <span class="meta-sep">•</span>
+      <span class="meta-item"><strong>Roll No:</strong> <span id="student-roll">10</span></span>
+      <span class="meta-sep">•</span>
+      <span class="meta-item"><strong>Course:</strong> <span id="student-course">Computer Networks (Module 3)</span></span>
+      <span class="meta-sep">•</span>
+      <span class="meta-item"><strong>Topic:</strong> Sliding Window Protocols (GBN vs SR)</span>
+    </div>
+  </footer>
+
 </div><!-- /page-wrapper -->
 
 <!-- =====================================================
@@ -300,12 +487,12 @@
 <nav class="controls-bar" role="navigation" aria-label="Simulation controls">
 
   <!-- Play / Pause -->
-  <button id="btn-play" class="btn btn-play" aria-label="Play simulation">
+  <button id="btn-play" class="btn btn-play" aria-label="Play simulation (Space)">
     ▶ Play
   </button>
 
   <!-- Reset -->
-  <button id="btn-reset" class="btn btn-reset" aria-label="Reset simulation">
+  <button id="btn-reset" class="btn btn-reset" aria-label="Reset simulation (R)">
     ↺ Reset
   </button>
 
@@ -367,19 +554,20 @@
 
   <div class="ctrl-sep" aria-hidden="true"></div>
 
-  <!-- Mirror Drops Toggle -->
-  <label class="toggle-label" for="toggle-mirror">
+  <!-- Mirror Drops Toggle (ON by default) -->
+  <label class="toggle-label" for="toggle-mirror" title="Toggle mirror drops between arenas (Key: M)">
     <span class="label-span">Mirror Drops</span>
     <div class="toggle-switch">
-      <input type="checkbox" id="toggle-mirror" aria-label="Mirror drops between arenas" />
+      <input type="checkbox" id="toggle-mirror" checked aria-label="Mirror drops between arenas" />
       <span class="toggle-slider"></span>
     </div>
   </label>
 
 </nav>
 
+
 <!-- =====================================================
-     COMPARISON MODAL (shown when both arenas complete)
+     FINAL RESULT MODAL (shown when both arenas complete)
      ===================================================== -->
 <div
   class="modal-backdrop hidden"
@@ -388,35 +576,304 @@
   aria-modal="true"
   aria-labelledby="modal-title"
 >
-  <div class="modal-card">
+  <div class="modal-card final-result-card">
     <div class="modal-header">
       <div>
-        <h2 class="modal-title" id="modal-title">Protocol Comparison</h2>
-        <p class="modal-subtitle">Both transfers complete — here's how they compare</p>
+        <h2 class="modal-title" id="modal-title">🏆 Protocol Comparison &mdash; Final Result</h2>
+        <p class="modal-subtitle">Both transfers completed under identical channel conditions</p>
       </div>
       <button class="btn-modal-close" id="modal-close" aria-label="Close comparison modal">
         ✕ Close
       </button>
     </div>
 
+    <!-- Live Winner Banner -->
+    <div class="final-winner-banner" id="final-winner-banner">
+      <div class="winner-trophy">🥇</div>
+      <div class="winner-info">
+        <h3 class="winner-heading" id="winner-heading">Selective Repeat Wins!</h3>
+        <p class="winner-sub" id="winner-sub">Selective Repeat required fewer retransmissions and achieved higher channel efficiency.</p>
+      </div>
+    </div>
+
+    <!-- Visual Bar Charts (Pure CSS) -->
+    <div class="chart-section">
+      <h4 class="chart-section-title">Visual Benchmark</h4>
+      <div class="bar-chart-group">
+        <div class="chart-row">
+          <div class="chart-label">Total Transmissions (Lower is Better)</div>
+          <div class="chart-bars">
+            <div class="bar-wrap">
+              <span class="bar-tag gbn">GBN</span>
+              <div class="bar-track">
+                <div class="bar-fill bar-gbn" id="bar-tx-gbn" style="width: 100%;"></div>
+              </div>
+              <span class="bar-num" id="bar-tx-gbn-val">0</span>
+            </div>
+            <div class="bar-wrap">
+              <span class="bar-tag sr">SR</span>
+              <div class="bar-track">
+                <div class="bar-fill bar-sr" id="bar-tx-sr" style="width: 75%;"></div>
+              </div>
+              <span class="bar-num" id="bar-tx-sr-val">0</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="chart-row">
+          <div class="chart-label">Completion Time (Sim Seconds)</div>
+          <div class="chart-bars">
+            <div class="bar-wrap">
+              <span class="bar-tag gbn">GBN</span>
+              <div class="bar-track">
+                <div class="bar-fill bar-gbn" id="bar-time-gbn" style="width: 100%;"></div>
+              </div>
+              <span class="bar-num" id="bar-time-gbn-val">0.0s</span>
+            </div>
+            <div class="bar-wrap">
+              <span class="bar-tag sr">SR</span>
+              <div class="bar-track">
+                <div class="bar-fill bar-sr" id="bar-time-sr" style="width: 80%;"></div>
+              </div>
+              <span class="bar-num" id="bar-time-sr-val">0.0s</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Comprehensive Metrics Table -->
     <table class="comp-table" aria-label="Protocol comparison statistics">
       <thead>
         <tr>
           <th style="text-align:left">Metric</th>
           <th class="th-gbn">Go-Back-N</th>
           <th class="th-sr">Sel. Repeat</th>
+          <th style="text-align:right">Advantage</th>
         </tr>
       </thead>
       <tbody id="comp-tbody">
-        <!-- Populated by main.js -->
+        <!-- Populated dynamically by main.js -->
       </tbody>
     </table>
 
-    <p class="modal-note">
-      Efficiency = unique packets / total transmissions. Higher is better.
-    </p>
+    <!-- Viva Key Takeaway Box -->
+    <div class="viva-takeaway-box">
+      <strong>💡 Viva Takeaway:</strong>
+      <span id="viva-takeaway-text">
+        Go-Back-N discards out-of-order packets and retransmits its entire window on timeout. Selective Repeat uses individual timers and receiver buffers, retransmitting ONLY genuinely lost packets.
+      </span>
+    </div>
+
+    <div class="modal-actions-row">
+      <button class="btn btn-modal-primary" id="btn-run-again">
+        ↺ Run Again
+      </button>
+      <button class="btn btn-modal-secondary" id="btn-modal-dismiss">
+        Close
+      </button>
+    </div>
   </div>
 </div>
+
+
+<!-- =====================================================
+     "HOW IT WORKS" THEORY EXPLAINER MODAL
+     ===================================================== -->
+<div
+  class="modal-backdrop hidden"
+  id="explainer-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="explainer-title"
+>
+  <div class="modal-card explainer-card">
+    <div class="modal-header">
+      <div>
+        <h2 class="modal-title" id="explainer-title">📖 Sliding Window Protocols: GBN vs. SR</h2>
+        <p class="modal-subtitle">Computer Networks &mdash; Module 3 (Data Link Layer Flow Control)</p>
+      </div>
+      <button class="btn-modal-close" id="explainer-close" aria-label="Close explainer modal">
+        ✕ Close
+      </button>
+    </div>
+
+    <div class="explainer-content">
+      <!-- Overview -->
+      <section class="explainer-section">
+        <h3>1. The Core Problem: Flow Control & Reliability</h3>
+        <p>
+          In a noisy communication channel, packets may be lost, corrupted, or delayed.
+          Stop-and-Wait protocol achieves correctness but suffers from terrible throughput ($U \ll 1$).
+          <strong>Sliding-window protocols</strong> allow the sender to transmit up to $W$ unACKed packets before stopping,
+          filling the bandwidth-delay product (BDP) pipe.
+        </p>
+      </section>
+
+      <!-- Mini ASCII/CSS Diagrams -->
+      <section class="explainer-section">
+        <h3>2. Window Architecture Comparison</h3>
+        <div class="diagram-grid">
+          <div class="diagram-box">
+            <div class="diagram-title gbn">Go-Back-N (GBN) Window</div>
+            <div class="diagram-art">
+<pre>
+Sender Window [base .. base + W - 1]
+[ 0 | 1 | 2 | 3 ] 4   5   6   7 ...
+  └─── W = 4 ───┘
+• 1 Logical Timer running for base (0).
+• Receiver Window size = 1 (accepts ONLY expectedSeq).
+• Out-of-order packets are DISCARDED.
+</pre>
+            </div>
+          </div>
+          <div class="diagram-box">
+            <div class="diagram-title sr">Selective Repeat (SR) Window</div>
+            <div class="diagram-art">
+<pre>
+Sender Window [sendBase .. sendBase + W - 1]
+[ 0 | 1 | 2 | 3 ] 4   5   6   7 ...
+  └─── W = 4 ───┘
+• N Independent Timers (one per in-flight packet).
+• Receiver Window size = W (buffers out-of-order).
+• Flushes consecutive prefix when gaps fill.
+</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Comprehensive 2-Column Comparison Table -->
+      <section class="explainer-section">
+        <h3>3. Detailed Technical Comparison Table</h3>
+        <table class="comp-table explainer-table">
+          <thead>
+            <tr>
+              <th style="text-align:left">Dimension</th>
+              <th class="th-gbn">Go-Back-N (GBN)</th>
+              <th class="th-sr">Selective Repeat (SR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>ACK Semantic</strong></td>
+              <td class="comp-gbn">Cumulative ACK: ACK(n) confirms all packets &le; n</td>
+              <td class="comp-sr">Individual ACK: ACK(n) confirms only packet n</td>
+            </tr>
+            <tr>
+              <td><strong>Receiver Window Size</strong></td>
+              <td class="comp-gbn">1 (no buffering)</td>
+              <td class="comp-sr">W (buffers packets in [rcvBase .. rcvBase + W - 1])</td>
+            </tr>
+            <tr>
+              <td><strong>Out-of-Order Policy</strong></td>
+              <td class="comp-gbn">Discard and re-send duplicate ACK for expectedSeq - 1</td>
+              <td class="comp-sr">Store in buffer slot; flush in-order prefix when gap fills</td>
+            </tr>
+            <tr>
+              <td><strong>Sender Timers</strong></td>
+              <td class="comp-gbn">1 Timer (protects the oldest unACKed packet `base`)</td>
+              <td class="comp-sr">1 Timer per packet (started independently on send)</td>
+            </tr>
+            <tr>
+              <td><strong>Retransmission Scope</strong></td>
+              <td class="comp-gbn">Entire Window [base .. nextSeq - 1]</td>
+              <td class="comp-sr">Only the specific timed-out packet</td>
+            </tr>
+            <tr>
+              <td><strong>Sequence Number Space</strong></td>
+              <td class="comp-gbn">W &le; 2<sup>m</sup> - 1</td>
+              <td class="comp-sr">W &le; 2<sup>m-1</sup> (prevents overlap ambiguity)</td>
+            </tr>
+            <tr>
+              <td><strong>Bandwidth Efficiency under Loss</strong></td>
+              <td class="comp-gbn">Lower (wastes link capacity on re-sending intact packets)</td>
+              <td class="comp-sr">Higher (optimal retransmissions only)</td>
+            </tr>
+            <tr>
+              <td><strong>Implementation Complexity</strong></td>
+              <td class="comp-gbn">Minimal (simple receiver logic)</td>
+              <td class="comp-sr">Moderate (buffer array management and re-ordering)</td>
+            </tr>
+            <tr>
+              <td><strong>Typical Real-World Use</strong></td>
+              <td class="comp-gbn">Low error rate links, embedded IoT memory-constrained devices</td>
+              <td class="comp-sr">High bandwidth-delay channels, satellite links, TCP SACK</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     KEYBOARD SHORTCUTS & HELP MODAL
+     ===================================================== -->
+<div
+  class="modal-backdrop hidden"
+  id="shortcuts-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="shortcuts-title"
+>
+  <div class="modal-card shortcuts-card">
+    <div class="modal-header">
+      <div>
+        <h2 class="modal-title" id="shortcuts-title">⌨️ Keyboard Shortcuts & Controls</h2>
+        <p class="modal-subtitle">Quick keys for presenter control during vivas and demonstrations</p>
+      </div>
+      <button class="btn-modal-close" id="shortcuts-close" aria-label="Close shortcuts modal">
+        ✕ Close
+      </button>
+    </div>
+
+    <div class="shortcuts-grid">
+      <div class="shortcut-item">
+        <kbd class="key-cap">Space</kbd>
+        <span class="shortcut-desc">Play / Pause simulation</span>
+      </div>
+      <div class="shortcut-item">
+        <kbd class="key-cap">R</kbd>
+        <span class="shortcut-desc">Reset simulation to initial state</span>
+      </div>
+      <div class="shortcut-item">
+        <kbd class="key-cap">D</kbd>
+        <span class="shortcut-desc">Start / Toggle Guided Demo mode</span>
+      </div>
+      <div class="shortcut-item">
+        <kbd class="key-cap">M</kbd>
+        <span class="shortcut-desc">Toggle Mirror Drops on / off</span>
+      </div>
+      <div class="shortcut-item">
+        <kbd class="key-cap">P</kbd>
+        <span class="shortcut-desc">Toggle Presentation Mode (large projector view)</span>
+      </div>
+      <div class="shortcut-item">
+        <kbd class="key-cap">S</kbd>
+        <span class="shortcut-desc">Toggle synthesized sound effects on / off</span>
+      </div>
+      <div class="shortcut-item">
+        <kbd class="key-cap">?</kbd>
+        <span class="shortcut-desc">Open this Keyboard Shortcuts cheat-sheet</span>
+      </div>
+      <div class="shortcut-item">
+        <kbd class="key-cap">Esc</kbd>
+        <span class="shortcut-desc">Close any open modal or exit Guided Demo</span>
+      </div>
+    </div>
+
+    <div class="self-test-section">
+      <div class="self-test-header">
+        <span>🧪 In-Browser Self-Tests</span>
+        <button class="btn btn-test-run" id="btn-run-tests">Run Protocol Verification</button>
+      </div>
+      <div class="self-test-output hidden" id="self-test-output"></div>
+    </div>
+  </div>
+</div>
+
 
 <!-- =====================================================
      SCRIPTS  (order matters)

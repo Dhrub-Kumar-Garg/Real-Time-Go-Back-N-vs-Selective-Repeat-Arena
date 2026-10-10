@@ -67,7 +67,12 @@
         timeouts: 0,           // timeout events triggered
         lost: 0,               // packets/ACKs dropped by user
         delivered: 0,          // unique packets delivered
+        wasted: 0,             // packets discarded / redundant transmissions
       },
+
+      // Scheduled mirrored drops
+      scheduledDrops: new Set(),
+      completionTime: null,
 
       // Status flags
       done: false,
@@ -283,7 +288,9 @@
       acks: s.acksReceived,
       timeouts: s.timeouts,
       lost: s.lost,
+      wasted: s.wasted || 0,
       efficiency: eff,
+      completionTime: state.completionTime,
     };
 
     Object.entries(vals).forEach(([key, val]) => {
@@ -340,8 +347,24 @@
 
     state.stats.sent++;
     _log(`[SEND] Sent DATA[${seq}]`, 'send');
+    if (get().Sound) get().Sound.play('send');
     _updateStats();
     _renderWindowCells();
+
+    // Check if a mirrored drop was scheduled for this sequence
+    if (state.scheduledDrops.has(seq)) {
+      state.scheduledDrops.delete(seq);
+      el.classList.add('pkt-mirror-target');
+      const badge = document.createElement('span');
+      badge.className = 'pkt-mirror-badge';
+      badge.textContent = 'LINKED';
+      el.appendChild(badge);
+      setTimeout(() => {
+        if (state && state.packets[seq] && state.packets[seq].state === 'in-flight' && !state.packets[seq].dropped) {
+          dropPacket(seq, 'data', true);
+        }
+      }, 240);
+    }
   }
 
   /* =========================================================
@@ -384,6 +407,7 @@
     state.stats.sent++;
     state.stats.retransmissions++;
     _log(`[RETX] Resent DATA[${seq}] (Go-Back-N recovery)`, 'retx');
+    if (get().Sound) get().Sound.play('send');
     _updateStats();
     _renderWindowCells();
   }
@@ -422,6 +446,7 @@
     } else {
       _log(`[ACK] Sent cumulative ACK[${seq}]`, 'ack');
     }
+    if (get().Sound) get().Sound.play('ack');
   }
 
   /* =========================================================
@@ -429,6 +454,7 @@
    * ========================================================= */
   function _handleTimeout(simTime) {
     state.stats.timeouts++;
+    if (get().Sound) get().Sound.play('timeout');
 
     const fromSeq = state.base;
     const toSeq = state.nextSeq - 1;
@@ -462,21 +488,52 @@
   /* =========================================================
    * CLICK-TO-DROP INTERACTION
    * ========================================================= */
-  function dropPacket(seq, kind = 'data') {
+  function dropPacket(seq, kind = 'data', isMirror = false) {
+    if (kind === 'ack') {
+      const ack = state && state.acks.find(a => (seq === undefined || a.seq === seq) && a.state === 'ack-flight' && !a.dropped);
+      if (ack) {
+        dropAck(ack);
+        return;
+      }
+    }
+
     const pkt = state && state.packets[seq];
-    if (!pkt || pkt.state !== 'in-flight' || pkt.dropped) return;
+    if (!pkt || pkt.state !== 'in-flight' || pkt.dropped) {
+      if (isMirror && state) {
+        state.scheduledDrops.add(seq);
+      }
+      return;
+    }
 
     pkt.dropped = true;
     pkt.state = 'dropped';
     state.stats.lost++;
     _updateStats();
 
-    _log(`[LOST] Packet DATA[${seq}] dropped in transit!`, 'lost');
+    if (isMirror) {
+      _log(`[LOST] (Mirrored) Packet DATA[${seq}] dropped in transit!`, 'lost');
+    } else {
+      _log(`[LOST] Packet DATA[${seq}] dropped in transit!`, 'lost');
+      if (kind === 'data' && get().SimConfig.mirrorDrops) {
+        get().EventBus.emit('mirror:drop', { source: 'gbn', seq, kind: 'data' });
+      }
+    }
+
+    if (get().Sound) get().Sound.play('loss');
 
     const el = pkt.element;
     pkt.element = null;
     if (el) {
-      get().dropPacketVisual(el, 'LOST');
+      if (isMirror) {
+        el.classList.add('pkt-mirror-target');
+        const badge = document.createElement('span');
+        badge.className = 'pkt-mirror-badge';
+        badge.textContent = 'LINKED';
+        el.appendChild(badge);
+        setTimeout(() => get().dropPacketVisual(el, 'LOST'), 160);
+      } else {
+        get().dropPacketVisual(el, 'LOST');
+      }
     }
   }
 
@@ -489,6 +546,7 @@
     _updateStats();
 
     _log(`[LOST] Cumulative ACK[${ack.seq}] dropped in transit! (Testing cumulative resilience)`, 'lost');
+    if (get().Sound) get().Sound.play('loss');
 
     const el = ack.element;
     ack.element = null;
@@ -576,6 +634,7 @@
         }
         // OUT-OF-ORDER ARRIVAL: discard and send duplicate ACK
         else {
+          state.stats.wasted = (state.stats.wasted || 0) + 1;
           _log(`[DISCARD] Received DATA[${pkt.seq}] out-of-order (expected ${state.expectedSeq}) – discarded!`, 'discard');
           _showDiscardAlert(pkt.seq, state.expectedSeq);
 
@@ -679,11 +738,12 @@
   function _finish(simTime) {
     if (state.done) return;
     state.done = true;
+    state.completionTime = simTime;
     _stopTimer();
     _updateTimerGauge(simTime);
     _log(`✅ Transfer complete! Total transmissions: ${state.stats.sent}`, 'success');
     _updateStats();
-    get().EventBus.emit('gbn:done', { stats: state.stats });
+    get().EventBus.emit('gbn:done', { stats: state.stats, completionTime: simTime });
 
     const overlay = state.container.querySelector('.done-overlay');
     if (overlay) overlay.classList.remove('hidden');
@@ -711,7 +771,9 @@
 
     if (state && state.container) {
       const channel = state.container.querySelector('.channel');
-      if (channel) channel.innerHTML = '';
+      if (channel) {
+        channel.querySelectorAll('.packet-el').forEach(el => el.remove());
+      }
       const strip = state.container.querySelector('.delivered-strip');
       if (strip) strip.innerHTML = '';
       const log = state.container.querySelector('.arena-log');
@@ -750,7 +812,22 @@
     get().SimConfig.speed = x;
   }
 
+  function scheduleDrop(seq) {
+    if (!state) return;
+    if (state.packets[seq] && state.packets[seq].state === 'in-flight' && !state.packets[seq].dropped) {
+      dropPacket(seq, 'data', true);
+    } else {
+      state.scheduledDrops.add(seq);
+    }
+  }
+
+  // Cross-arena mirror drop listener
+  get().EventBus.on('mirror:drop', (data) => {
+    if (!data || data.source === 'gbn' || data.kind !== 'data') return;
+    scheduleDrop(data.seq);
+  });
+
   /* Expose onto window.GBN */
-  global.GBN = { init, start, pause, reset, setWindowSize, setSpeed, dropPacket };
+  global.GBN = { init, start, pause, reset, setWindowSize, setSpeed, dropPacket, dropAck, scheduleDrop };
 
 })(window);
